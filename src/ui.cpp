@@ -1,4 +1,3 @@
-//Display 64x64 album art as 128x128 using TJpg_Decoder
 #include <Arduino.h>
 #include <SpotifyEsp32.h>
 #include <lvgl.h>
@@ -6,7 +5,6 @@
 #include <ui.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <TJpg_Decoder.h>
 #include "esp_time.h" // Assumed external header for time functions
 #include "secrets.h" // Assumed external header for WiFi/Spotify credentials
 #include "debouncer.h"
@@ -43,31 +41,18 @@ static bool toggleMute = false;
 
 /* Cache for all display data */
 String lastTrack = "";
-String album_art = "";
 String cachedArtist = "";
 String cachedTrack = "";
-String cachedAlbumArtUrl = "";
 String cachedDeviceName = "";
 
 /* Thread-safe handoff to main core */
 static String nextArtist = "";
 static String nextTrack = "";
-static String nextAlbumArtUrl = "";
 static String nextDevice = "";
 static bool newArtist = false;
 static bool newTrack = false;
-static bool newAlbumArt = false;
 static bool newDevice = false;
 SemaphoreHandle_t data_mutex = NULL;
-
-// ==================== ALBUM ART GLOBALS ========================
-static lv_img_dsc_t* albumArtImg = nullptr;
-static uint16_t* rgb565_buffer = nullptr;
-static const int IMG_WIDTH = 64;
-static const int IMG_HEIGHT = 64;
-static bool albumArtReady = false;
-static int objWidth = 128;
-static int objHeight = 128;
 
 // curr and end time
 unsigned long cachedProgress = 0;
@@ -133,190 +118,6 @@ void printMemory(const char* location) {
                   location, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
-// ==================== ALBUM ART FUNCTIONS ========================
-// TJpg_Decoder callback to output decoded 64x64 image data to the RGB565 buffer
-bool tjpgOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (!rgb565_buffer) return false;
-    
-    // Copy directly - no transformations needed
-    for (int16_t j = 0; j < h; j++) {
-        for (int16_t i = 0; i < w; i++) {
-            int destX = x + i;
-            int destY = y + j;
-            if (destX < IMG_WIDTH && destY < IMG_HEIGHT) {
-                rgb565_buffer[destY * IMG_WIDTH + destX] = bitmap[j * w + i];
-            }
-        }
-    }
-    return true;
-}
-
-// Downloads JPEG album art and decodes it into a 64x64 RGB565 buffer
-void downloadAndStoreAlbumArt(String url) {
-    if (url.length() == 0 || url == "Something went wrong" || !url.startsWith("http")) {
-        Serial.println("Invalid album art URL: " + url);
-        return;
-    }
-    
-    // Store old buffer to free after new one is ready
-    uint16_t* old_buffer = nullptr;
-    if (xSemaphoreTake(data_mutex, (TickType_t)100) == pdTRUE) {
-        old_buffer = rgb565_buffer;
-        rgb565_buffer = nullptr;  // Clear reference temporarily
-        albumArtReady = false;    // Prevent LVGL from using old buffer
-        xSemaphoreGive(data_mutex);
-    }
-    
-    Serial.println("Downloading album art from: " + url);
-    printMemory("Before download");
-    
-    HTTPClient http;
-    http.begin(url);
-    http.setTimeout(5000);
-    int httpCode = http.GET();
-    
-    if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("HTTP GET failed, code: %d\n", httpCode);
-        http.end();
-        if (old_buffer) free(old_buffer);
-        return;
-    }
-    
-    int len = http.getSize();
-    Serial.printf("Image size: %d bytes\n", len);
-    
-    if (len <= 0 || len > 100000) {
-        Serial.printf("Invalid image size: %d\n", len);
-        http.end();
-        if (old_buffer) free(old_buffer);
-        return;
-    }
-    
-    WiFiClient* stream = http.getStreamPtr();
-    
-    // Allocate buffer for compressed JPEG
-    uint8_t* jpegBuffer = (uint8_t*)malloc(len);
-    if (!jpegBuffer) {
-        Serial.println("Failed to allocate JPEG buffer");
-        http.end();
-        if (old_buffer) free(old_buffer);
-        return;
-    }
-    
-    int bytesRead = 0;
-    while (http.connected() && bytesRead < len) {
-        size_t available = stream->available();
-        if (available) {
-            int toRead = min((int)available, len - bytesRead);
-            int read = stream->readBytes(jpegBuffer + bytesRead, toRead);
-            bytesRead += read;
-        }
-        delay(1);
-    }
-    http.end();
-    
-    Serial.printf("Downloaded %d bytes\n", bytesRead);
-    printMemory("After download");
-    
-    // Validate JPEG header
-    if (bytesRead < 4 || jpegBuffer[0] != 0xFF || jpegBuffer[1] != 0xD8) {
-        Serial.println("ERROR: Invalid JPEG header");
-        free(jpegBuffer);
-        if (old_buffer) free(old_buffer);
-        return;
-    }
-    
-    // Allocate RGB565 buffer (64x64 = 4096 pixels)
-    rgb565_buffer = (uint16_t*)heap_caps_malloc(IMG_WIDTH * IMG_HEIGHT * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!rgb565_buffer) {
-        Serial.println("Failed to allocate RGB565 buffer");
-        free(jpegBuffer);
-        if (old_buffer) free(old_buffer);
-        return;
-    }
-    memset(rgb565_buffer, 0, IMG_WIDTH * IMG_HEIGHT * sizeof(uint16_t));
-    
-    // Decode JPEG to RGB565 buffer
-    TJpgDec.setJpgScale(1); // Decode to actual size (64x64)
-    TJpgDec.setSwapBytes(false);  // This matches your display's byte order
-    TJpgDec.setCallback(tjpgOutput);
-    
-    JRESULT jres = TJpgDec.drawJpg(0, 0, jpegBuffer, bytesRead);
-    
-    if (jres != JDR_OK) {
-        Serial.printf("ERROR: JPEG decode failed, result=%d\n", jres);
-        free(jpegBuffer);
-        free(rgb565_buffer);
-        rgb565_buffer = nullptr;
-        if (old_buffer) free(old_buffer);
-        return;
-    }
-    
-    free(jpegBuffer);
-    
-    Serial.println("✓ Album art decoded to RGB565 (64x64)");
-    printMemory("After decode");
-    
-    // Mark as ready for LVGL and cleanup old buffer
-    if (xSemaphoreTake(data_mutex, portMAX_DELAY) == pdTRUE) {
-        albumArtReady = true;
-        xSemaphoreGive(data_mutex);
-    }
-    
-    // Safe to free old buffer now that new one is ready
-    if (old_buffer) {
-        free(old_buffer);
-    }
-}
-
-// Applies the decoded 64x64 image to the LVGL image object and sets scale to 128x128
-void applyAlbumArtToLVGL() {
-    // Thread-safe access to buffer
-    if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
-        if (!rgb565_buffer) {
-            Serial.println("No RGB565 buffer to apply");
-            xSemaphoreGive(data_mutex);
-            return;
-        }
-        
-        // Create LVGL image descriptor if needed
-        if (!albumArtImg) {
-            albumArtImg = (lv_img_dsc_t*)malloc(sizeof(lv_img_dsc_t));
-            if (!albumArtImg) {
-                Serial.println("Failed to allocate LVGL image descriptor");
-                xSemaphoreGive(data_mutex);
-                return;
-            }
-            memset(albumArtImg, 0, sizeof(lv_img_dsc_t));
-        }
-        
-        // Setup image descriptor for 64x64 RGB565 image
-        albumArtImg->header.cf = LV_COLOR_FORMAT_RGB565;
-        albumArtImg->header.w = IMG_WIDTH;
-        albumArtImg->header.h = IMG_HEIGHT;
-        albumArtImg->data = (const uint8_t*)rgb565_buffer;
-        albumArtImg->data_size = IMG_WIDTH * IMG_HEIGHT * sizeof(uint16_t);
-        
-        // Set the source to the in-memory image
-        lv_image_set_src(ui_Image1, (const void*)albumArtImg);
-        
-        // Scale 64x64 -> 128x128 (2x zoom = 512 in LVGL units where 256 = 1x)
-        lv_img_set_zoom(ui_Image1, 512);
-        
-        // Reset the albumArtReady flag to prevent repeated applications
-        albumArtReady = false;
-        
-        xSemaphoreGive(data_mutex);
-        
-        Serial.println("✓ Album art applied (64x64 -> 128x128)");
-        printMemory("After LVGL apply");
-    } else {
-        Serial.println("Failed to acquire mutex for album art application");
-    }
-}
-
-// ==================== END ALBUM ART FUNCTIONS ====================
-
 // Utility function to format milliseconds into M:SS string
 String formatTime(unsigned long ms) {
     unsigned long seconds = ms / 1000;
@@ -360,9 +161,6 @@ void updateSpotifyData() {
     filter["device"]["name"] = true;
     
     response playback_resp = sp.current_playback_state(filter);
-
-    // Separate call for album art (using the specific 64x64 image size index)
-    String albumArtUrl = sp.get_current_album_image_url(2);
 
     unsigned long elapsed = millis() - startTime;
     Serial.printf("Spotify API calls took %lu ms\n", elapsed);
@@ -413,18 +211,7 @@ void updateSpotifyData() {
                 Serial.println("Track fetched: " + track);
             }
 
-            // Album art URL check
-            if (albumArtUrl != cachedAlbumArtUrl && 
-                albumArtUrl.length() > 0 && 
-                albumArtUrl != "Something went wrong" &&
-                albumArtUrl.startsWith("http")) {
-                cachedAlbumArtUrl = albumArtUrl;
-                nextAlbumArtUrl = albumArtUrl;
-                newAlbumArt = true;
-                Serial.println("Album art URL fetched: " + albumArtUrl);
-            } else if (albumArtUrl == "Something went wrong" || !albumArtUrl.startsWith("http")) {
-                Serial.println("Invalid album art URL from Spotify API");
-            }
+
             
             if (deviceName.length() > 0 && deviceName != cachedDeviceName) {
                 cachedDeviceName = deviceName;
@@ -447,14 +234,7 @@ void updateSpotifyData() {
             xSemaphoreGive(data_mutex);
         }
 
-        // Download album art OUTSIDE mutex - this is a blocking operation
-        if (newAlbumArt && nextAlbumArtUrl.length() > 0) {
-            // The downloadAndStoreAlbumArt function sets albumArtReady to true inside a mutex
-            Serial.println("Downloading new album art...");
-            downloadAndStoreAlbumArt(nextAlbumArtUrl);
-            newAlbumArt = false; // Reset flag after download attempt
-            Serial.println("Album art download attempt finished.");
-        }
+
     } else {
         Serial.printf("Spotify API error: %d\n", playback_resp.status_code);
     }
@@ -587,13 +367,13 @@ void buttonChecks(){
     }
     if(button3.justPressed()){
         Serial.println("Pause");
-        if(xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
+        if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
             requestStop = true;
             xSemaphoreGive(data_mutex);
         }
     }
     if(button4.justPressed()){
-        Serial.println("Next Track");
+        Serial.println("Button 4: Next Track");
         if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
             requestNextTrack = true;
             xSemaphoreGive(data_mutex);
@@ -733,7 +513,6 @@ void loop () {
     // Thread-safe data handoff from Core 1 to Core 0 (where LVGL runs)
     bool applyArtist = false;
     bool applyTrack = false;
-    bool applyAlbumArt = false;
     bool applyDevice = false;
     String artistLocal;
     String trackLocal;
@@ -758,10 +537,7 @@ void loop () {
             nextDevice = "";
             applyDevice = true;
         }
-        if (albumArtReady) {
-            albumArtReady = false;
-            applyAlbumArt = true;
-        }
+
         xSemaphoreGive(data_mutex);
     }
 
@@ -781,9 +557,6 @@ void loop () {
     if (applyDevice) {
         lv_label_set_text(ui_PLAYING_DEVICE, deviceLocal.c_str()); 
         Serial.println("Device applied to LVGL: " + deviceLocal);
-    }
-    if (applyAlbumArt) {
-        applyAlbumArtToLVGL();
     }
 
     // Time and progress update (every 1 second)

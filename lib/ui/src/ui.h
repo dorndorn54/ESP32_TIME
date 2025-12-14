@@ -40,7 +40,7 @@ extern lv_obj_t * ui____initial_actions0;
 
 // IMAGES AND IMAGE SETS
 LV_IMG_DECLARE(ui_img_719776243);    // assets/speaker-filled-audio-tool.png
-LV_IMG_DECLARE(ui_img_square_200x200_imresizer_png);    // assets/Square_200x200_imresizer.png
+LV_IMG_DECLARE(ui_img_1011443021);    // assets/Adobe Express - file.png
 
 // UI INIT
 void ui_init(void);

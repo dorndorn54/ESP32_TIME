@@ -17,7 +17,7 @@ lv_obj_t * ui_Bar1 = NULL;
 lv_obj_t * ui_Panel2 = NULL;
 lv_obj_t * ui_Image2 = NULL;
 lv_obj_t * ui_PLAYING_DEVICE = NULL;
-lv_obj_t * ui_Image1 = NULL;
+lv_obj_t * ui_Image3 = NULL;
 // event funtions
 
 // build funtions
@@ -130,14 +130,15 @@ void ui_Screen1_screen_init(void)
     lv_obj_set_align(ui_PLAYING_DEVICE, LV_ALIGN_CENTER);
     lv_label_set_text(ui_PLAYING_DEVICE, "PLAYING ON ");
 
-    ui_Image1 = lv_image_create(ui_Screen1);
-    lv_image_set_src(ui_Image1, &ui_img_square_200x200_imresizer_png);
-    lv_obj_set_width(ui_Image1, LV_SIZE_CONTENT);   /// 150
-    lv_obj_set_height(ui_Image1, LV_SIZE_CONTENT);    /// 150
-    lv_obj_set_x(ui_Image1, 0);
-    lv_obj_set_y(ui_Image1, -51);
-    lv_obj_set_align(ui_Image1, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_Image1, LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    ui_Image3 = lv_image_create(ui_Screen1);
+    lv_image_set_src(ui_Image3, &ui_img_1011443021);
+    lv_obj_set_width(ui_Image3, LV_SIZE_CONTENT);   /// 150
+    lv_obj_set_height(ui_Image3, LV_SIZE_CONTENT);    /// 150
+    lv_obj_set_x(ui_Image3, -3);
+    lv_obj_set_y(ui_Image3, -56);
+    lv_obj_set_align(ui_Image3, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_Image3, LV_OBJ_FLAG_CLICKABLE);     /// Flags
+    lv_obj_remove_flag(ui_Image3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
 }
 
@@ -158,6 +159,6 @@ void ui_Screen1_screen_destroy(void)
     ui_Panel2 = NULL;
     ui_Image2 = NULL;
     ui_PLAYING_DEVICE = NULL;
-    ui_Image1 = NULL;
+    ui_Image3 = NULL;
 
 }
