@@ -134,7 +134,7 @@ void ui_Screen1_screen_init(void)
     lv_image_set_src(ui_Image3, &ui_img_1011443021);
     lv_obj_set_width(ui_Image3, LV_SIZE_CONTENT);   /// 150
     lv_obj_set_height(ui_Image3, LV_SIZE_CONTENT);    /// 150
-    lv_obj_set_x(ui_Image3, -3);
+    lv_obj_set_x(ui_Image3, 0);
     lv_obj_set_y(ui_Image3, -56);
     lv_obj_set_align(ui_Image3, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_Image3, LV_OBJ_FLAG_CLICKABLE);     /// Flags

@@ -10,6 +10,7 @@
 #include "debouncer.h"
 #include "rotary.h"
 
+
 TaskHandle_t spotifyTaskHandle = NULL;
 
 /*buttons definitions*/
@@ -74,7 +75,7 @@ Spotify sp(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
 // Timing for non-blocking updates
 unsigned long lastSpotifyUpdate = 0;
 unsigned long lastTimeUpdate = 0;
-const unsigned long SPOTIFY_UPDATE_INTERVAL = 3000;
+const unsigned long SPOTIFY_UPDATE_INTERVAL = 1000;
 const unsigned long TIME_UPDATE_INTERVAL = 1000;
 
 #if LV_USE_LOG != 0
@@ -114,8 +115,7 @@ void my_touchpad_read (lv_indev_t * indev_driver, lv_indev_data_t * data) {
 static uint32_t my_tick_get_cb (void) { return millis(); }
 
 void printMemory(const char* location) {
-    Serial.printf("[%s] Free: %d, Largest: %d\n", 
-                  location, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    //Serial.printf("[%s] Free: %d, Largest: %d\n", location, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
 // Utility function to format milliseconds into M:SS string
@@ -233,8 +233,6 @@ void updateSpotifyData() {
 
             xSemaphoreGive(data_mutex);
         }
-
-
     } else {
         Serial.printf("Spotify API error: %d\n", playback_resp.status_code);
     }
@@ -483,6 +481,8 @@ void setup () {
     lv_tick_set_cb( my_tick_get_cb );
 
     ui_init(); // Assumed function from ui.h
+    lv_obj_set_style_text_font(ui_ARTIST_SONG, &NotoSansCJK_Regular_compressed_v2, 0);
+    lv_obj_set_style_text_font(ui_ARTIST_NAME1, &NotoSansCJK_Regular_compressed_v2, 0);
     printMemory("After UI init");
 
     // Initial updates
@@ -496,7 +496,7 @@ void setup () {
         "SpotifyTask",
         16384, // Stack size
         NULL,  // Parameter
-        1,     // Priority
+        5,     // Priority
         &spotifyTaskHandle,
         1     // Core to pin to
     );
@@ -576,7 +576,7 @@ void loop () {
             // Update LVGL labels
             lv_label_set_text(ui_CURR_TIME, progressStr.c_str());
             lv_label_set_text(ui_END_TIME, durationStr.c_str());
-            
+
             // Update progress bar
             int progressPercent = (currentProgress * 100) / cachedDuration;
             lv_bar_set_value(ui_Bar1, progressPercent, LV_ANIM_OFF);
