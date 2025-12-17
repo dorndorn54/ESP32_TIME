@@ -10,7 +10,6 @@
 #include "debouncer.h"
 #include "rotary.h"
 
-
 TaskHandle_t spotifyTaskHandle = NULL;
 
 /*buttons definitions*/
@@ -18,11 +17,13 @@ TaskHandle_t spotifyTaskHandle = NULL;
 #define buttonPlay 26   // Play/Resume
 #define buttonPause 33  // Pause/Stop
 #define buttonNext 27   // Next track
+#define shuffleButton 5    // Shuffle toggle
 
 Debouncer button1(buttonPrev);
 Debouncer button2(buttonPlay);
 Debouncer button3(buttonPause);
 Debouncer button4(buttonNext);
+Debouncer button5(shuffleButton);
 
 /*rotor pins*/
 #define SW 14
@@ -35,10 +36,10 @@ static bool requestPlay = false;
 static bool requestNextTrack = false;
 static bool requestPrevTrack = false;
 static bool requestStop = false;
-
 static bool increaseVolume = false;
 static bool decreaseVolume = false;
 static bool toggleMute = false;
+static bool toggleShuffle = false;
 
 /* Cache for all display data */
 String lastTrack = "";
@@ -53,6 +54,7 @@ static String nextDevice = "";
 static bool newArtist = false;
 static bool newTrack = false;
 static bool newDevice = false;
+static bool isShuffle = false;
 SemaphoreHandle_t data_mutex = NULL;
 
 // curr and end time
@@ -159,6 +161,7 @@ void updateSpotifyData() {
     filter["item"]["duration_ms"] = true;
     filter["item"]["artists"][0]["name"] = true;
     filter["device"]["name"] = true;
+    filter["shuffle_state"] = true;
     
     response playback_resp = sp.current_playback_state(filter);
 
@@ -175,6 +178,7 @@ void updateSpotifyData() {
         unsigned long progress = 0;
         unsigned long duration = 0;
         bool playing = false;
+        bool shuffle = false;
         
         if (doc["item"]["artists"][0]["name"]) {
             artist = doc["item"]["artists"][0]["name"].as<String>();
@@ -194,6 +198,9 @@ void updateSpotifyData() {
         if (doc["is_playing"]) {
             playing = doc["is_playing"].as<bool>();
         }
+        if(doc["shuffle_state"]){
+            shuffle = doc["shuffle_state"].as<bool>();
+        }
 
         // Update cached values with mutex for thread-safe handoff
         if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
@@ -211,8 +218,6 @@ void updateSpotifyData() {
                 Serial.println("Track fetched: " + track);
             }
 
-
-            
             if (deviceName.length() > 0 && deviceName != cachedDeviceName) {
                 cachedDeviceName = deviceName;
                 nextDevice = deviceName;
@@ -230,6 +235,9 @@ void updateSpotifyData() {
                              formatTime(progress).c_str(), 
                              formatTime(duration).c_str());
             }
+            
+            //set shuffle state
+            isShuffle = shuffle;
 
             xSemaphoreGive(data_mutex);
         }
@@ -263,7 +271,7 @@ int get_current_volume() {
 
 bool buttonFlag(void){
     // the goal of this function is to speed up the API CALL
-    return requestPlay || requestNextTrack || requestPrevTrack || requestStop || increaseVolume || decreaseVolume || toggleMute;
+    return requestPlay || requestNextTrack || requestPrevTrack || requestStop || increaseVolume || decreaseVolume || toggleMute || toggleShuffle;
 }
 
 void executeButtonAction(){
@@ -274,6 +282,7 @@ void executeButtonAction(){
     bool doIncreaseVolume = false;
     bool doDecreaseVolume = false;
     bool doToggleMute = false;
+    bool doToggleShuffle = false;
 
     if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
         doPlay = requestPlay;
@@ -283,6 +292,7 @@ void executeButtonAction(){
         doIncreaseVolume = increaseVolume;
         doDecreaseVolume = decreaseVolume;
         doToggleMute = toggleMute;
+        doToggleShuffle = toggleShuffle;
 
         // Reset requests
         requestPlay = false;
@@ -292,6 +302,7 @@ void executeButtonAction(){
         increaseVolume = false;
         decreaseVolume = false;
         toggleMute = false;
+        toggleShuffle = false;
 
         xSemaphoreGive(data_mutex);
     }
@@ -346,18 +357,34 @@ void executeButtonAction(){
             Serial.println("Unable to get current volume for mute toggle.");
         }
     }
+    if(doToggleShuffle){
+        Serial.printf("Toggling Shuffle (current state: %s)\n", isShuffle ? "ON" : "OFF");
+        bool newShuffleState = !isShuffle;
+        Serial.printf("Calling sp.shuffle(%s)\n", newShuffleState ? "true" : "false");
+
+        response shuffle_resp = sp.shuffle(newShuffleState);
+
+        Serial.printf("Shuffle response code: %d\n", shuffle_resp.status_code);
+        if(shuffle_resp.status_code == 204 || shuffle_resp.status_code == 200) {
+            Serial.println("Shuffle toggled successfully");
+            // UPDATE LOCAL STATE IMMEDIATELY:
+            isShuffle = newShuffleState;
+        } else {
+            Serial.printf("Shuffle toggle failed with code: %d\n", shuffle_resp.status_code);
+        }
+    }
 }
 
 void buttonChecks(){
     if(button1.justPressed()){
-        Serial.println("Previous Track");
+        Serial.println("Previous Track Button Pressed");
         if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
             requestPrevTrack = true;
             xSemaphoreGive(data_mutex);
         }
     }
     if(button2.justPressed()){
-        Serial.println("Play");
+        Serial.println("Play Button Pressed");
         if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
             requestPlay = true;
             xSemaphoreGive(data_mutex);
@@ -395,6 +422,13 @@ void buttonChecks(){
         Serial.println("Rotary Button Pressed");
         if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
             toggleMute = true;
+            xSemaphoreGive(data_mutex);
+        }
+    }
+    if(button5.justPressed()){
+        Serial.println("Shuffle Button Pressed");
+        if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
+            toggleShuffle = true;
             xSemaphoreGive(data_mutex);
         }
     }
@@ -576,6 +610,15 @@ void loop () {
             // Update LVGL labels
             lv_label_set_text(ui_CURR_TIME, progressStr.c_str());
             lv_label_set_text(ui_END_TIME, durationStr.c_str());
+            
+            if(isShuffle){
+                lv_obj_set_flag(ui_shufflegreen, LV_OBJ_FLAG_HIDDEN, false);
+                lv_obj_set_flag(ui_shuffleblack, LV_OBJ_FLAG_HIDDEN, true);
+            }
+            else{
+                lv_obj_set_flag(ui_shufflegreen, LV_OBJ_FLAG_HIDDEN, true);
+                lv_obj_set_flag(ui_shuffleblack, LV_OBJ_FLAG_HIDDEN, false);
+            }
 
             // Update progress bar
             int progressPercent = (currentProgress * 100) / cachedDuration;

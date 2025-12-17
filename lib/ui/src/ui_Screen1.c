@@ -18,6 +18,8 @@ lv_obj_t * ui_Panel2 = NULL;
 lv_obj_t * ui_Image2 = NULL;
 lv_obj_t * ui_PLAYING_DEVICE = NULL;
 lv_obj_t * ui_Image3 = NULL;
+lv_obj_t * ui_shufflegreen = NULL;
+lv_obj_t * ui_shuffleblack = NULL;
 // event funtions
 
 // build funtions
@@ -140,6 +142,28 @@ void ui_Screen1_screen_init(void)
     lv_obj_add_flag(ui_Image3, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
+    ui_shufflegreen = lv_image_create(ui_Screen1);
+    lv_image_set_src(ui_shufflegreen, &ui_img_shuffle_green_20_20_png);
+    lv_obj_set_width(ui_shufflegreen, LV_SIZE_CONTENT);   /// 20
+    lv_obj_set_height(ui_shufflegreen, LV_SIZE_CONTENT);    /// 20
+    lv_obj_set_x(ui_shufflegreen, -58);
+    lv_obj_set_y(ui_shufflegreen, 110);
+    lv_obj_set_align(ui_shufflegreen, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_shufflegreen, LV_OBJ_FLAG_CLICKABLE);     /// Flags
+    lv_obj_remove_flag(ui_shufflegreen, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_image_set_scale(ui_shufflegreen, 400);
+
+    ui_shuffleblack = lv_image_create(ui_Screen1);
+    lv_image_set_src(ui_shuffleblack, &ui_img_shuffle_black_20_20_png);
+    lv_obj_set_width(ui_shuffleblack, LV_SIZE_CONTENT);   /// 20
+    lv_obj_set_height(ui_shuffleblack, LV_SIZE_CONTENT);    /// 20
+    lv_obj_set_x(ui_shuffleblack, -58);
+    lv_obj_set_y(ui_shuffleblack, 110);
+    lv_obj_set_align(ui_shuffleblack, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_shuffleblack, LV_OBJ_FLAG_CLICKABLE);     /// Flags
+    lv_obj_remove_flag(ui_shuffleblack, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_image_set_scale(ui_shuffleblack, 400);
+
 }
 
 void ui_Screen1_screen_destroy(void)
@@ -160,5 +184,7 @@ void ui_Screen1_screen_destroy(void)
     ui_Image2 = NULL;
     ui_PLAYING_DEVICE = NULL;
     ui_Image3 = NULL;
+    ui_shufflegreen = NULL;
+    ui_shuffleblack = NULL;
 
 }

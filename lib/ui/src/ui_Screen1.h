@@ -26,6 +26,8 @@ extern lv_obj_t * ui_Panel2;
 extern lv_obj_t * ui_Image2;
 extern lv_obj_t * ui_PLAYING_DEVICE;
 extern lv_obj_t * ui_Image3;
+extern lv_obj_t * ui_shufflegreen;
+extern lv_obj_t * ui_shuffleblack;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
