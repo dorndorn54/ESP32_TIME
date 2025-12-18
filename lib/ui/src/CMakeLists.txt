@@ -6,7 +6,9 @@ SET(SOURCES ui_comp_song_name_picture.c
     ui_helpers.c
     ui_img_719776243.c
     ui_img_1011443021.c
+    ui_img_shuffle_black_20_20_png.c
     ui_img_shuffle_green_20_20_png.c
-    ui_img_shuffle_black_20_20_png.c)
+    ui_img_circle_plus_50_50_png.c
+    ui_img_circle_minus_50_50_png.c)
 
 add_library(ui ${SOURCES})

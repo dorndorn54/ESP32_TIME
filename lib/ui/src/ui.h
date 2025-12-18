@@ -41,8 +41,10 @@ extern lv_obj_t * ui____initial_actions0;
 // IMAGES AND IMAGE SETS
 LV_IMG_DECLARE(ui_img_719776243);    // assets/speaker-filled-audio-tool.png
 LV_IMG_DECLARE(ui_img_1011443021);    // assets/Adobe Express - file.png
-LV_IMG_DECLARE(ui_img_shuffle_green_20_20_png);    // assets/shuffle_green_20_20.png
 LV_IMG_DECLARE(ui_img_shuffle_black_20_20_png);    // assets/shuffle_black_20_20.png
+LV_IMG_DECLARE(ui_img_shuffle_green_20_20_png);    // assets/shuffle_green_20_20.png
+LV_IMG_DECLARE(ui_img_circle_plus_50_50_png);    // assets/circle_plus_50_50.png
+LV_IMG_DECLARE(ui_img_circle_minus_50_50_png);    // assets/circle_minus_50_50.png
 
 // UI INIT
 void ui_init(void);

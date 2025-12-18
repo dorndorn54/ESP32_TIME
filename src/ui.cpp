@@ -5,10 +5,11 @@
 #include <ui.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include "esp_time.h" // Assumed external header for time functions
-#include "secrets.h" // Assumed external header for WiFi/Spotify credentials
+#include "esp_time.h"
+#include "secrets.h"
 #include "debouncer.h"
 #include "rotary.h"
+#include "output_pin.h"
 
 TaskHandle_t spotifyTaskHandle = NULL;
 
@@ -18,16 +19,21 @@ TaskHandle_t spotifyTaskHandle = NULL;
 #define buttonPause 33  // Pause/Stop
 #define buttonNext 27   // Next track
 #define shuffleButton 5    // Shuffle toggle
+#define likeButton 0   // Like/Unlike toggle
+#define outputPinLED 22 // Onboard LED pin
 
 Debouncer button1(buttonPrev);
 Debouncer button2(buttonPlay);
 Debouncer button3(buttonPause);
 Debouncer button4(buttonNext);
 Debouncer button5(shuffleButton);
+Debouncer button6(likeButton);
+
+outputPin led(outputPinLED);
 
 /*rotor pins*/
-#define SW 14
-#define DT 32
+#define SW 32
+#define DT 14
 #define CLK 13
 RotaryEncoder rotary(SW, DT, CLK);
 
@@ -40,6 +46,12 @@ static bool increaseVolume = false;
 static bool decreaseVolume = false;
 static bool toggleMute = false;
 static bool toggleShuffle = false;
+static bool toggleLike = false;
+
+// LED state and timing
+static bool ledActive = false;
+static unsigned long ledStartTime = 0;
+const unsigned long LED_HOLD_TIME = 1000; // 1 second
 
 /* Cache for all display data */
 String lastTrack = "";
@@ -55,6 +67,8 @@ static bool newArtist = false;
 static bool newTrack = false;
 static bool newDevice = false;
 static bool isShuffle = false;
+static String currentTrackId = "";
+static bool isLiked = false;
 SemaphoreHandle_t data_mutex = NULL;
 
 // curr and end time
@@ -82,7 +96,7 @@ const unsigned long TIME_UPDATE_INTERVAL = 1000;
 
 #if LV_USE_LOG != 0
 void my_print(const char * buf) {
-    Serial.printf(buf);
+    //Serial.printf(buf);
     Serial.flush();
 }
 #endif
@@ -158,6 +172,7 @@ void updateSpotifyData() {
     filter["progress_ms"] = true;
     filter["is_playing"] = true;
     filter["item"]["name"] = true;
+    filter["item"]["id"] = true;
     filter["item"]["duration_ms"] = true;
     filter["item"]["artists"][0]["name"] = true;
     filter["device"]["name"] = true;
@@ -174,6 +189,7 @@ void updateSpotifyData() {
         // Extract all data from single response
         String artist = "";
         String track = "";
+        String trackId = "";
         String deviceName = "";
         unsigned long progress = 0;
         unsigned long duration = 0;
@@ -185,6 +201,9 @@ void updateSpotifyData() {
         }
         if (doc["item"]["name"]) {
             track = doc["item"]["name"].as<String>();
+        }
+        if (doc["item"]["id"]) {
+            trackId = doc["item"]["id"].as<String>();
         }
         if (doc["device"]["name"]) {
             deviceName = doc["device"]["name"].as<String>();
@@ -208,21 +227,25 @@ void updateSpotifyData() {
                 cachedArtist = artist;
                 nextArtist = artist;
                 newArtist = true;
-                Serial.println("Artist fetched: " + artist);
+                //Serial.println("Artist fetched: " + artist);
             }
 
             if (track.length() > 0 && track != cachedTrack) {
                 cachedTrack = track;
                 nextTrack = track;
                 newTrack = true;
-                Serial.println("Track fetched: " + track);
+                //Serial.println("Track fetched: " + track);
+            }
+
+            if (trackId.length() > 0) {
+                currentTrackId = trackId;
             }
 
             if (deviceName.length() > 0 && deviceName != cachedDeviceName) {
                 cachedDeviceName = deviceName;
                 nextDevice = deviceName;
                 newDevice = true;
-                Serial.println("Device fetched: " + deviceName);
+                //Serial.println("Device fetched: " + deviceName);
             }
             
             // Cache progress/duration
@@ -240,6 +263,26 @@ void updateSpotifyData() {
             isShuffle = shuffle;
 
             xSemaphoreGive(data_mutex);
+        }
+
+        // Always check "Liked Songs" status for current track (runs every update)
+        if (currentTrackId.length() > 0) {
+            const char* ids[1] = { currentTrackId.c_str() };
+            response liked_resp = sp.check_user_saved_tracks(1, ids);
+            if (liked_resp.status_code == 200 && !liked_resp.reply.isNull()) {
+                bool liked = false;
+                // Spotify returns an array of booleans, index 0 corresponds to our single id
+                if (liked_resp.reply[0]) {
+                    liked = liked_resp.reply[0].as<bool>();
+                }
+                if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
+                    isLiked = liked;
+                    xSemaphoreGive(data_mutex);
+                }
+                //Serial.printf("Liked Songs check: %s\n", liked ? "LIKED" : "NOT LIKED");
+            } else {
+                //Serial.printf("Failed to check liked songs, code: %d\n", liked_resp.status_code);
+            }
         }
     } else {
         Serial.printf("Spotify API error: %d\n", playback_resp.status_code);
@@ -271,7 +314,7 @@ int get_current_volume() {
 
 bool buttonFlag(void){
     // the goal of this function is to speed up the API CALL
-    return requestPlay || requestNextTrack || requestPrevTrack || requestStop || increaseVolume || decreaseVolume || toggleMute || toggleShuffle;
+    return requestPlay || requestNextTrack || requestPrevTrack || requestStop || increaseVolume || decreaseVolume || toggleMute || toggleShuffle || toggleLike;
 }
 
 void executeButtonAction(){
@@ -283,6 +326,9 @@ void executeButtonAction(){
     bool doDecreaseVolume = false;
     bool doToggleMute = false;
     bool doToggleShuffle = false;
+    bool doToggleLike = false;
+    String trackIdForLike;
+    bool currentLikeState = false;
 
     if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
         doPlay = requestPlay;
@@ -293,6 +339,9 @@ void executeButtonAction(){
         doDecreaseVolume = decreaseVolume;
         doToggleMute = toggleMute;
         doToggleShuffle = toggleShuffle;
+        doToggleLike = toggleLike;
+        trackIdForLike = currentTrackId;
+        currentLikeState = isLiked;
 
         // Reset requests
         requestPlay = false;
@@ -303,6 +352,7 @@ void executeButtonAction(){
         decreaseVolume = false;
         toggleMute = false;
         toggleShuffle = false;
+        toggleLike = false;
 
         xSemaphoreGive(data_mutex);
     }
@@ -358,19 +408,60 @@ void executeButtonAction(){
         }
     }
     if(doToggleShuffle){
-        Serial.printf("Toggling Shuffle (current state: %s)\n", isShuffle ? "ON" : "OFF");
+        //Serial.printf("Toggling Shuffle (current state: %s)\n", isShuffle ? "ON" : "OFF");
         bool newShuffleState = !isShuffle;
-        Serial.printf("Calling sp.shuffle(%s)\n", newShuffleState ? "true" : "false");
+        //Serial.printf("Calling sp.shuffle(%s)\n", newShuffleState ? "true" : "false");
 
         response shuffle_resp = sp.shuffle(newShuffleState);
 
-        Serial.printf("Shuffle response code: %d\n", shuffle_resp.status_code);
+        //Serial.printf("Shuffle response code: %d\n", shuffle_resp.status_code);
         if(shuffle_resp.status_code == 204 || shuffle_resp.status_code == 200) {
-            Serial.println("Shuffle toggled successfully");
+            //Serial.println("Shuffle toggled successfully");
             // UPDATE LOCAL STATE IMMEDIATELY:
             isShuffle = newShuffleState;
         } else {
-            Serial.printf("Shuffle toggle failed with code: %d\n", shuffle_resp.status_code);
+            //Serial.printf("Shuffle toggle failed with code: %d\n", shuffle_resp.status_code);
+        }
+    }
+    if(doToggleLike){
+        if(trackIdForLike.length() > 0) {
+            //Serial.printf("Toggling Like (current state: %s)\n", currentLikeState ? "LIKED" : "NOT LIKED");
+            const char* ids[1] = { trackIdForLike.c_str() };
+            response like_resp;
+            
+            if(currentLikeState) {
+                // Currently liked, so unlike it
+                //Serial.println("Removing track from Liked Songs");
+                like_resp = sp.remove_user_saved_tracks(1, ids);
+            } else {
+                // Currently not liked, so like it
+                //Serial.println("Adding track to Liked Songs");
+                like_resp = sp.save_tracks_for_current_user(1, ids);
+            }
+            
+            //Serial.printf("Like toggle response code: %d\n", like_resp.status_code);
+            if(like_resp.status_code == 200 || like_resp.status_code == 204) {
+                //Serial.println("Like status toggled successfully");
+                // Update local state immediately
+                if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
+                    isLiked = !currentLikeState;
+                    xSemaphoreGive(data_mutex);
+                }
+            } else {
+                //Serial.printf("Like toggle failed with code: %d\n", like_resp.status_code);
+            }
+        } else {
+            //Serial.println("Cannot toggle like: no track ID available");
+        }
+    }
+    
+    // Activate LED if any button action was executed
+    if(doPlay || doNextTrack || doPrevTrack || doStop || doIncreaseVolume || doDecreaseVolume || doToggleMute || doToggleShuffle || doToggleLike) {
+        if(!ledActive) {
+            led.setHigh();
+            ledActive = true;
+            ledStartTime = millis();
+            //Serial.println("LED turned ON (1 second hold)");
         }
     }
 }
@@ -429,6 +520,13 @@ void buttonChecks(){
         Serial.println("Shuffle Button Pressed");
         if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
             toggleShuffle = true;
+            xSemaphoreGive(data_mutex);
+        }
+    }
+    if(button6.justPressed()){
+        Serial.println("Like Button Pressed");
+        if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
+            toggleLike = true;
             xSemaphoreGive(data_mutex);
         }
     }
@@ -543,6 +641,13 @@ void loop () {
     vTaskDelay(1);
 
     buttonChecks();
+    
+    // Non-blocking LED timeout logic
+    if(ledActive && (millis() - ledStartTime >= LED_HOLD_TIME)) {
+        led.setLow();
+        ledActive = false;
+        //Serial.println("LED turned OFF (1 second hold completed)");
+    }
 
     // Thread-safe data handoff from Core 1 to Core 0 (where LVGL runs)
     bool applyArtist = false;
@@ -577,12 +682,12 @@ void loop () {
 
     if (applyArtist) {
         lv_label_set_text(ui_ARTIST_NAME1, artistLocal.c_str());
-        Serial.println("Artist applied to LVGL: " + artistLocal);
+        //Serial.println("Artist applied to LVGL: " + artistLocal);
     }
 
     if (applyTrack) {
         lv_label_set_text(ui_ARTIST_SONG, trackLocal.c_str());
-        Serial.println("Track applied to LVGL: " + trackLocal);
+        //Serial.println("Track applied to LVGL: " + trackLocal);
 
         if (trackLocal != lastTrack) {
             lastTrack = trackLocal;
@@ -590,7 +695,7 @@ void loop () {
     }
     if (applyDevice) {
         lv_label_set_text(ui_PLAYING_DEVICE, deviceLocal.c_str()); 
-        Serial.println("Device applied to LVGL: " + deviceLocal);
+        //Serial.println("Device applied to LVGL: " + deviceLocal);
     }
 
     // Time and progress update (every 1 second)
@@ -610,19 +715,28 @@ void loop () {
             // Update LVGL labels
             lv_label_set_text(ui_CURR_TIME, progressStr.c_str());
             lv_label_set_text(ui_END_TIME, durationStr.c_str());
-            
-            if(isShuffle){
-                lv_obj_set_flag(ui_shufflegreen, LV_OBJ_FLAG_HIDDEN, false);
-                lv_obj_set_flag(ui_shuffleblack, LV_OBJ_FLAG_HIDDEN, true);
-            }
-            else{
-                lv_obj_set_flag(ui_shufflegreen, LV_OBJ_FLAG_HIDDEN, true);
-                lv_obj_set_flag(ui_shuffleblack, LV_OBJ_FLAG_HIDDEN, false);
-            }
 
             // Update progress bar
             int progressPercent = (currentProgress * 100) / cachedDuration;
             lv_bar_set_value(ui_Bar1, progressPercent, LV_ANIM_OFF);
+        }
+
+        //update the shuffle icon
+        if(isShuffle){
+            lv_obj_set_flag(ui_shufflegreen, LV_OBJ_FLAG_HIDDEN, false);
+            lv_obj_set_flag(ui_shuffleblack, LV_OBJ_FLAG_HIDDEN, true);
+        }else{
+            lv_obj_set_flag(ui_shufflegreen, LV_OBJ_FLAG_HIDDEN, true);
+            lv_obj_set_flag(ui_shuffleblack, LV_OBJ_FLAG_HIDDEN, false);
+        }
+        
+        //visualisation to show if the song is currently liked
+        if(isLiked){
+            lv_obj_set_flag(ui_circleplus, LV_OBJ_FLAG_HIDDEN, true);
+            lv_obj_set_flag(ui_circleminus, LV_OBJ_FLAG_HIDDEN, false);
+        }else{
+            lv_obj_set_flag(ui_circleplus, LV_OBJ_FLAG_HIDDEN, false);
+            lv_obj_set_flag(ui_circleminus, LV_OBJ_FLAG_HIDDEN, true);
         }
     }
 }
