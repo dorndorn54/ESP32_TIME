@@ -13,7 +13,7 @@ private:
     unsigned long debounceDelay;
 
 public:
-    Debouncer(uint8_t buttonPin, unsigned long delay = 100) {
+    Debouncer(uint8_t buttonPin, unsigned long delay = 20) {
         pin = buttonPin;
         debounceDelay = delay;
         pinMode(pin, INPUT_PULLUP);
