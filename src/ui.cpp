@@ -222,6 +222,8 @@ void updateSpotifyData() {
         }
 
         // Update cached values with mutex for thread-safe handoff
+        bool shouldCheckLiked = false;
+        String trackIdToCheck;
         if (xSemaphoreTake(data_mutex, (TickType_t)10) == pdTRUE) {
             if (artist.length() > 0 && artist != cachedArtist) {
                 cachedArtist = artist;
@@ -237,8 +239,10 @@ void updateSpotifyData() {
                 //Serial.println("Track fetched: " + track);
             }
 
-            if (trackId.length() > 0) {
+            if (trackId.length() > 0 && trackId != currentTrackId) {
                 currentTrackId = trackId;
+                trackIdToCheck = trackId;
+                shouldCheckLiked = true; // only check liked when track changes
             }
 
             if (deviceName.length() > 0 && deviceName != cachedDeviceName) {
@@ -265,9 +269,9 @@ void updateSpotifyData() {
             xSemaphoreGive(data_mutex);
         }
 
-        // Always check "Liked Songs" status for current track (runs every update)
-        if (currentTrackId.length() > 0) {
-            const char* ids[1] = { currentTrackId.c_str() };
+        // Check "Liked Songs" status only when track changes
+        if (shouldCheckLiked && trackIdToCheck.length() > 0) {
+            const char* ids[1] = { trackIdToCheck.c_str() };
             response liked_resp = sp.check_user_saved_tracks(1, ids);
             if (liked_resp.status_code == 200 && !liked_resp.reply.isNull()) {
                 bool liked = false;
