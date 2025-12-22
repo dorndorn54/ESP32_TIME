@@ -72,7 +72,9 @@ lib_deps =
 ### Required Files
 - `secrets.h` - WiFi and Spotify credentials (see Configuration)
 - `ui.h/ui.cpp` - LVGL UI files (generated from SquareLine Studio)
-- Custom fonts for CJK character support
+- NotoSansCJK_Regular_compressed_v2.c is to be placed in the folder .pio\libdeps\nodemcu-32s\lvgl\src\font\NotoSansCJK_Regular_compressed_v2.c
+- User_Setup.h is to replace the same file found in .pio\libdeps\nodemcu-32s\TFT_eSPI\User_Setup.h
+- lv_conf.h is to replace the same file found in .pio\libdeps\nodemcu-32s\lvgl\lv_conf.h
 
 ## Installation
 
@@ -256,13 +258,7 @@ Solution: Regenerate CJK fonts with reduced character set
 
 ## Future Improvements
 
-- [ ] Add repeat mode toggle
-- [ ] Display album artwork (requires external storage)
-- [ ] Playlist selection via UI
-- [ ] Touch screen support
-- [ ] OTA (Over-The-Air) updates
 - [ ] Battery power option
-- [ ] 3D-printed enclosure design
 
 ## Credits
 
