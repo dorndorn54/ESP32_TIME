@@ -4,7 +4,7 @@ A physical Spotify controller built with ESP32, featuring a TFT display and hard
 
 
 ![photo_2025-12-22_16-14-10](https://github.com/user-attachments/assets/1ae203d9-7814-4b7b-be34-4f9f686be238)
-
+<img src="https://github.com/user-attachments/assets/1ae203d9-7814-4b7b-be34-4f9f686be238" width="300">
 ## Features
 
 - 🎵 **Playback Control**: Play, pause, next, previous track
